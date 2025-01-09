@@ -69,6 +69,7 @@ class TeneoBot {
         this.CoderMarkPrinted = false;
         this.proxyBackupList = [];
         this.maxProxyRetries = 3;
+        this.version = 'v2.0';
 
         this.logger = pino(pretty({
             colorize: true,
@@ -385,12 +386,34 @@ class TeneoBot {
     }
 
     async setupWebSocket(account, access_token, proxy) {
+        const userAgents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Edge/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Edge/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Edge/120.0.0.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 OPR/114.0.0.",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.3",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AtContent/95.5.5462.5",
+        ];
+    
+        const wsUrl = `wss://${this.websocketUrl}/websocket?accessToken=${encodeURIComponent(access_token)}&version=${encodeURIComponent(this.version)}`;
         const agent = await this.getProxyAgent(proxy);
-        const wsUrl = `wss://${this.websocketUrl}/websocket?accessToken=${encodeURIComponent(access_token)}&version=v0.2`;
+        
+        const wsOptions = {
+            agent,
+            headers: {
+                'Origin': 'chrome-extension://emcclcoaglgcpoognfiggmhnhgabppkm',
+                'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
+            },
+            handshakeTimeout: 30000
+        };
 
-        const ws = new WebSocket(wsUrl, {
-            agent
-        });
+        const ws = new WebSocket(wsUrl, wsOptions);
 
         ws.on('open', () => {
             this.log(`${cl.am}]> ${cl.gl}WebSocket connected ${cl.rt}for ${this.hideEmail(account.email)}`);
@@ -419,12 +442,12 @@ class TeneoBot {
 
         ws.on('error', async (error) => {
             this.log(`${cl.am}]> ${cl.rd}WebSocket error ${cl.rt}for ${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
-            this.handleWebSocketError(account, access_token, proxy, ws);
+            await this.handleWebSocketError(account, access_token, proxy, ws);
         });
 
         ws.on('close', async () => {
             this.log(`${cl.am}]> ${cl.rd}WebSocket closed ${cl.rt}for ${this.hideEmail(account.email)}`, 'warn');
-            this.handleWebSocketError(account, access_token, proxy, ws);
+            await this.handleWebSocketError(account, access_token, proxy, ws);
         });
 
         return ws;
