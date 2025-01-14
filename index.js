@@ -449,6 +449,11 @@ class TeneoBot {
                 };
 
                 const ws = new WebSocket(wsUrl, wsOptions);
+                ws._retryCount = 0;
+                ws._maxRetries = 3;
+                ws._access_token = access_token;
+                ws._proxy = proxy;
+
                 let connectionTimeoutId = setTimeout(() => {
                     ws.terminate();
                     reject(new Error('WebSocket connection timeout'));
@@ -457,6 +462,7 @@ class TeneoBot {
                 ws.on('open', () => {
                     clearTimeout(connectionTimeoutId);
                     this.log(`${cl.am}]> ${cl.gl}WebSocket connected ${cl.rt}for ${this.hideEmail(account.email)}`);
+                    ws._retryCount = 0;
 
                     ws.pingInterval = setInterval(() => {
                         if (ws.readyState === WebSocket.OPEN) {
@@ -530,32 +536,33 @@ class TeneoBot {
             }
         }
         
-        this.activeConnections.delete(account.email);
-        
-        try {
-            const newWs = await this.reconnectWebSocket(account, access_token, proxy, ws);
-            this.activeConnections.set(account.email, newWs);
-        } catch (error) {
-            this.log(`${cl.am}]> ${cl.rd}Failed to reconnect ${cl.rt}${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
+        if (!ws._retryCount || ws._retryCount < ws._maxRetries) {
+            ws._retryCount = (ws._retryCount || 0) + 1;
+            this.log(`${cl.am}]> ${cl.yl}Attempting reconnection for ${this.hideEmail(account.email)} (attempt ${ws._retryCount})`);
+            
+            try {
+                const newWs = await this.setupWebSocket(account, access_token, proxy);
+                this.activeConnections.set(account.email, newWs);
+            } catch (error) {
+                this.log(`${cl.am}]> ${cl.rd}Failed to reconnect ${cl.rt}${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
+                if (ws._retryCount >= ws._maxRetries) {
+                    await this.moveFailedAccountToError(account, proxy);
+                    this.activeConnections.delete(account.email);
+                }
+            }
+        } else {
+            this.activeConnections.delete(account.email);
         }
-    }
-
-    async saveAccountData(accountData) {
-        const filePath = path.join(__dirname, 'DataAllAccount.js');
-        const fileContent = `const DataAllAccount = ${JSON.stringify(accountData, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
-        await fs.writeFile(filePath, fileContent, 'utf-8');
     }
 
     async moveFailedAccountToError(account, proxy) {
         try {
-            // Validate input parameters
             if (!account || !account.email) {
                 throw new Error('Invalid account data');
             }
 
-            // Read existing error accounts if file exists
-            let errorAccounts = [];
             const errorFilePath = path.join(__dirname, 'accounts_error.json');
+            let errorAccounts = [];
             
             try {
                 const errorContent = await fs.readFile(errorFilePath, 'utf-8');
@@ -564,48 +571,53 @@ class TeneoBot {
                 // File doesn't exist yet, continue with empty array
             }
 
-            // Add failed account with its proxy
-            errorAccounts.push({
-                account: account,
-                proxy: proxy ? proxy.trim() : null,
-                timestamp: new Date().toISOString()
-            });
+            // Check if account already exists in error file
+            const accountExists = errorAccounts.some(entry => entry.account.email === account.email);
+            
+            if (!accountExists) {
+                errorAccounts.push({
+                    account: account,
+                    proxy: proxy ? proxy.trim() : null,
+                    timestamp: new Date().toISOString()
+                });
 
-            // Save to accounts_error.json
-            await fs.writeFile(
-                errorFilePath,
-                JSON.stringify(errorAccounts, null, 2),
-                'utf-8'
-            );
-
-            // Remove account from accounts.js if accountLists exists
-            if (typeof accountLists !== 'undefined' && Array.isArray(accountLists)) {
-                const updatedAccounts = accountLists.filter(acc => acc.email !== account.email);
                 await fs.writeFile(
-                    path.join(__dirname, 'accounts.js'),
-                    `const accountLists = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { accountLists };`,
+                    errorFilePath,
+                    JSON.stringify(errorAccounts, null, 2),
                     'utf-8'
                 );
-            }
 
-            // Remove proxy from proxy.txt if proxy exists
-            if (proxy) {
-                const proxyFilePath = path.join(__dirname, 'proxy.txt');
+                // Remove from DataAllAccount.js
+                const dataAllAccountPath = path.join(__dirname, 'DataAllAccount.js');
                 try {
-                    const proxyContent = await fs.readFile(proxyFilePath, 'utf-8');
-                    const proxyList = proxyContent.split('\n')
-                        .map(p => p.trim())
-                        .filter(p => p && p !== proxy.trim());
-                    await fs.writeFile(proxyFilePath, proxyList.join('\n'), 'utf-8');
+                    const { DataAllAccount } = require('./DataAllAccount.js');
+                    const updatedAccounts = DataAllAccount.filter(acc => acc.email !== account.email);
+                    
+                    const fileContent = `const DataAllAccount = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
+                    await fs.writeFile(dataAllAccountPath, fileContent, 'utf-8');
                 } catch (error) {
-                    this.log(`${cl.am}]> ${cl.rd}Error updating proxy file: ${error.message}${cl.rt}`, 'error');
+                    this.log(`${cl.am}]> ${cl.rd}Error updating DataAllAccount.js: ${error.message}${cl.rt}`, 'error');
                 }
-            }
 
-            this.log(`${cl.am}]> ${cl.yl}Moved failed account ${this.hideEmail(account.email)} to accounts_error.json${cl.rt}`);
+                // Remove proxy if exists
+                if (proxy) {
+                    const proxyFilePath = path.join(__dirname, 'proxy.txt');
+                    try {
+                        const proxyContent = await fs.readFile(proxyFilePath, 'utf-8');
+                        const proxyList = proxyContent.split('\n')
+                            .map(p => p.trim())
+                            .filter(p => p && p !== proxy.trim());
+                        await fs.writeFile(proxyFilePath, proxyList.join('\n'), 'utf-8');
+                    } catch (error) {
+                        this.log(`${cl.am}]> ${cl.rd}Error updating proxy file: ${error.message}${cl.rt}`, 'error');
+                    }
+                }
+
+                this.log(`${cl.am}]> ${cl.yl}Moved failed account ${this.hideEmail(account.email)} to accounts_error.json${cl.rt}`);
+            }
         } catch (error) {
             this.log(`${cl.am}]> ${cl.rd}Error moving failed account to error file: ${error.message}${cl.rt}`, 'error');
-            throw error; // Re-throw the error to be handled by the caller
+            throw error;
         }
     }
 
