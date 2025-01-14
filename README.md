@@ -9,12 +9,14 @@
 #                                                      #
 ########################################################
 -->
->[!WARNING]
-> ## Teneo server is still unstable <br>
-> ## You will definitely find the error: `Unexpected server response: 520,502,524, etc.`
-> ## This error is from the server, which is unstable or overloaded
 
 # ᝰ.ᐟ teneo-node-bot-js
+
+>[!TIP]
+> ## Teneo Server Now Normal <br>
+> ## Please Update Your Bot Script to version 1.1`
+> ## Everything is Good now!
+
 > [!TIP]
 > If you find this script helpful and beneficial, please star ⭐ this repository. Your support motivates me to create more useful tools in the future.
 > 
