@@ -1,7 +1,7 @@
 /**
 ########################################################
 #                                                      #
-#   CODE  : Teneo Node Bot v1.1 (Exstension v2.0.0)    #
+#   CODE  : Teneo Node Bot v1.0 (Exstension v2.0.0)    #
 #   NodeJs: v22.9.0                                    #
 #   Author: Furqonflynn (cmalf)                        #
 #   TG    : https://t.me/furqonflynn                   #
@@ -71,11 +71,7 @@ class TeneoBot {
         this.maxProxyRetries = 3;
         this.version = 'v0.2';
 
-        this.logger = pino(pretty({
-            colorize: true,
-            translateTime: `SYS:${DateTime.now().setZone(this.wita).toFormat('MM/dd/yyyy HH:mm:ss Z')}`,
-            ignore: 'pid,hostname'
-        }));
+        this.initializeLogger();
 
         this.rl = readline.createInterface({
             input: process.stdin,
@@ -141,16 +137,49 @@ class TeneoBot {
             this.log(`${cl.am}]> ${cl.rd}Error occurred: ${error.message} in ${context}`, 'error');
         };
 
+        this.setupEventHandlers();
+        this.startTimeUpdate();
+    }
+
+    initializeLogger() {
+        const getTranslateTime = () => {
+            return `SYS:${DateTime.now().setZone(this.wita).toFormat('MM/dd/yyyy HH:mm:ss Z')}`;
+        };
+
+        this.logger = pino(pretty({
+            colorize: true,
+            translateTime: getTranslateTime(),
+            ignore: 'pid,hostname'
+        }));
+
+        // Update logger configuration every second
+        this.updateLogger = () => {
+            this.logger = pino(pretty({
+                colorize: true,
+                translateTime: getTranslateTime(),
+                ignore: 'pid,hostname'
+            }));
+        };
+    }
+
+    startTimeUpdate() {
+        setInterval(() => {
+            this.updateLogger();
+        }, 1000);
+    }
+
+    setupEventHandlers() {
         process.on('SIGINT', () => {
-            console.log(`${cl.am}]> ${cl.rd}Exiting program with Blessing...`, 'error');
+            console.log(`${cl.am}]> ${cl.rd}Exiting program with Blessing...`);
             process.exit(0);
         });
+
         process.on('unhandledRejection', (reason, promise) => {
-            console.log(`${cl.am}]> ${cl.red}Unhandled Rejection at:${cl.rt}`, promise, `${cl.red}reason:${cl.rt}`, reason);
+            console.log(`${cl.am}]> ${cl.rd}Unhandled Rejection at:${cl.rt}`, promise, `${cl.rd}reason:${cl.rt}`, reason);
         });
 
         process.on('uncaughtException', (error) => {
-            console.log(`${cl.am}]> ${cl.red}Uncaught Exception:${cl.rt}`, error);
+            console.log(`${cl.am}]> ${cl.rd}Uncaught Exception:${cl.rt}`, error);
             process.exit(1);
         });
     }
@@ -158,7 +187,8 @@ class TeneoBot {
     log(message, level = 'info', meta = {}) {
         this.logger[level]({
             ...meta,
-            msg: message
+            msg: message,
+            timestamp: DateTime.now().setZone(this.wita).toFormat('MM/dd/yyyy HH:mm:ss Z')
         });
     }
 
@@ -312,15 +342,15 @@ class TeneoBot {
 
     async reconnectWebSocket(account, access_token, proxy, ws) {
         const maxRetries = 5;
-        const baseDelay = 15000; // 15 seconds base delay
-        const maxDelay = 300000; // 5 minutes maximum delay
+        const baseDelay = 15000;
+        const maxDelay = 300000;
         let retryCount = 0;
         let currentProxy = proxy;
 
         const cleanup = () => {
             if (ws) {
                 try {
-                    clearInterval(ws.pingInterval);
+                    if (ws.pingInterval) clearInterval(ws.pingInterval);
                     ws.removeAllListeners();
                     ws.terminate();
                 } catch (err) {
@@ -330,9 +360,8 @@ class TeneoBot {
         };
 
         const calculateDelay = (attempt) => {
-            // Exponential backoff with jitter
             const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
-            const jitter = Math.random() * 1000; // Add up to 1 second of random jitter
+            const jitter = Math.random() * 1000;
             return exponentialDelay + jitter;
         };
 
@@ -352,10 +381,8 @@ class TeneoBot {
                 }
 
                 this.log(`${cl.am}]> ${cl.yl}Attempting reconnection ${cl.rt}for ${this.hideEmail(account.email)} (attempt ${retryCount + 1})`);
-
                 const newWs = await this.setupWebSocket(account, access_token, currentProxy);
-
-                // Ensure old connection is removed before setting new one
+                
                 this.activeConnections.delete(account.email);
                 this.activeConnections.set(account.email, newWs);
 
@@ -369,14 +396,9 @@ class TeneoBot {
                     const delay = calculateDelay(retryCount);
                     this.log(`${cl.am}]> ${cl.yl}Waiting ${delay/1000} seconds before next retry`, 'warn');
 
-                    await new Promise((resolve, reject) => {
-                        const timeoutId = setTimeout(() => {
-                            clearTimeout(timeoutId);
-                            resolve();
-                        }, delay);
+                    return new Promise((resolve) => {
+                        setTimeout(() => resolve(reconnect()), delay);
                     });
-
-                    return reconnect();
                 }
                 throw error;
             }
@@ -400,54 +422,62 @@ class TeneoBot {
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.3",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AtContent/95.5.5462.5",
         ];
-    
-        const wsUrl = `wss://${this.websocketUrl}/websocket?accessToken=${encodeURIComponent(access_token)}&version=${encodeURIComponent(this.version)}`;
-        const agent = await this.getProxyAgent(proxy);
-        
-        const wsOptions = {
-            agent,
-            headers: {
-                'Origin': 'chrome-extension://emcclcoaglgcpoognfiggmhnhgabppkm',
-                'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-                'Upgrade': 'websocket',
-                'Connection': 'Upgrade',
-                'Sec-WebSocket-Version': '13',
-                'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits'
-            },
-            handshakeTimeout: 30000,
-            maxPayload: 1024 * 1024,
-            followRedirects: true,
-            perMessageDeflate: {
-                clientNoContextTakeover: true,
-                serverNoContextTakeover: true,
-                clientMaxWindowBits: 10,
-                concurrencyLimit: 10
-            }
-        };
 
-        const ws = new WebSocket(wsUrl, wsOptions);
+        return new Promise((resolve, reject) => {
+            const wsUrl = `wss://${this.websocketUrl}/websocket?accessToken=${encodeURIComponent(access_token)}&version=${encodeURIComponent(this.version)}`;
+            
+            this.getProxyAgent(proxy).then(agent => {
+                const wsOptions = {
+                    agent,
+                    headers: {
+                        'Origin': 'chrome-extension://emcclcoaglgcpoognfiggmhnhgabppkm',
+                        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+                        'Upgrade': 'websocket',
+                        'Connection': 'Upgrade',
+                        'Sec-WebSocket-Version': '13',
+                        'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits'
+                    },
+                    handshakeTimeout: 30000,
+                    maxPayload: 1024 * 1024,
+                    followRedirects: true,
+                    perMessageDeflate: {
+                        clientNoContextTakeover: true,
+                        serverNoContextTakeover: true,
+                        clientMaxWindowBits: 10,
+                        concurrencyLimit: 10
+                    }
+                };
 
-        // Set up a connection timeout
-        const connectionTimeout = setTimeout(() => {
-            if (ws.readyState !== WebSocket.OPEN) {
-                ws.terminate();
-                throw new Error('WebSocket connection timeout');
-            }
-        }, wsOptions.handshakeTimeout);
+                const ws = new WebSocket(wsUrl, wsOptions);
+                let connectionTimeoutId = setTimeout(() => {
+                    ws.terminate();
+                    reject(new Error('WebSocket connection timeout'));
+                }, wsOptions.handshakeTimeout);
 
-        ws.on('open', () => {
-            clearTimeout(connectionTimeout);
-            this.log(`${cl.am}]> ${cl.gl}WebSocket connected ${cl.rt}for ${this.hideEmail(account.email)}`);
+                ws.on('open', () => {
+                    clearTimeout(connectionTimeoutId);
+                    this.log(`${cl.am}]> ${cl.gl}WebSocket connected ${cl.rt}for ${this.hideEmail(account.email)}`);
 
-            ws.pingInterval = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({
-                        type: "PING"
-                    }));
-                }
-            }, 10000);
+                    ws.pingInterval = setInterval(() => {
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({ type: "PING" }));
+                        }
+                    }, 10000);
+
+                    resolve(ws);
+                });
+
+                ws.on('error', (error) => {
+                    clearTimeout(connectionTimeoutId);
+                    reject(error);
+                });
+
+                this.setupMessageHandler(ws, account);
+            }).catch(reject);
         });
+    }
 
+    setupMessageHandler(ws, account) {
         ws.on('message', (data) => {
             try {
                 const message = JSON.parse(data);
@@ -465,8 +495,11 @@ class TeneoBot {
                         this.log(`${baseLogStr} ${cl.bl}- Pulse: ${pointsStr}${heartbeatsStr}`);
                         break;
 
+                    case "Invalid authentication token. Please log in again.":
+                        this.log(`${baseLogStr} ${cl.rd} Invalid authentication token. Please log in again.`);
+                        break;
+
                     default:
-                        // Optional: Log unknown message types for debugging
                         this.log(`${baseLogStr} - Received message: ${JSON.stringify(message)}`);
                 }
             } catch (error) {
@@ -474,26 +507,30 @@ class TeneoBot {
             }
         });
 
-        ws.on('error', async (error) => {
-            this.log(`${cl.am}]> ${cl.rd}WebSocket error ${cl.rt}for ${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
-            await this.handleWebSocketError(account, access_token, proxy, ws);
-        });
-
         ws.on('close', async () => {
             this.log(`${cl.am}]> ${cl.rd}WebSocket closed ${cl.rt}for ${this.hideEmail(account.email)}`, 'warn');
-            await this.handleWebSocketError(account, access_token, proxy, ws);
+            await this.handleWebSocketError(account, ws._access_token, ws._proxy, ws);
         });
-
-        return ws;
     }
 
     async handleWebSocketError(account, access_token, proxy, ws) {
-        this.cleanupWebSocket(account.email);
+        if (ws) {
+            clearInterval(ws.pingInterval);
+            ws.removeAllListeners();
+            try {
+                ws.terminate();
+            } catch (error) {
+                // Ignore termination errors
+            }
+        }
+        
+        this.activeConnections.delete(account.email);
+        
         try {
             const newWs = await this.reconnectWebSocket(account, access_token, proxy, ws);
             this.activeConnections.set(account.email, newWs);
         } catch (error) {
-            this.log(`Failed to reconnect ${this.hideEmail(account.email)}: ${error.message}`, 'error');
+            this.log(`${cl.am}]> ${cl.rd}Failed to reconnect ${cl.rt}${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
         }
     }
 
@@ -503,13 +540,57 @@ class TeneoBot {
         await fs.writeFile(filePath, fileContent, 'utf-8');
     }
 
+    async moveFailedAccountToError(account, proxy) {
+        try {
+            // Read existing error accounts if file exists
+            let errorAccounts = [];
+            try {
+                const errorContent = await fs.readFile(path.join(__dirname, 'accounts_error.json'), 'utf-8');
+                errorAccounts = JSON.parse(errorContent);
+            } catch (error) {
+                // File doesn't exist yet, start with empty array
+            }
+
+            // Add failed account with its proxy
+            errorAccounts.push({
+                account: account,
+                proxy: proxy,
+                timestamp: new Date().toISOString()
+            });
+
+            // Save to accounts_error.json
+            await fs.writeFile(
+                path.join(__dirname, 'accounts_error.json'),
+                JSON.stringify(errorAccounts, null, 2),
+                'utf-8'
+            );
+
+            // Remove account from accounts.js
+            const updatedAccounts = accountLists.filter(acc => acc.email !== account.email);
+            await fs.writeFile(
+                path.join(__dirname, 'accounts.js'),
+                `const accountLists = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { accountLists };`,
+                'utf-8'
+            );
+
+            // Remove proxy from proxy.txt
+            const proxyContent = await fs.readFile(path.join(__dirname, 'proxy.txt'), 'utf-8');
+            const proxyList = proxyContent.split('\n').filter(p => p.trim() !== proxy.trim());
+            await fs.writeFile(path.join(__dirname, 'proxy.txt'), proxyList.join('\n'), 'utf-8');
+
+            this.log(`${cl.am}]> ${cl.yl}Moved failed account ${this.hideEmail(account.email)} to accounts_error.json${cl.rt}`);
+        } catch (error) {
+            this.log(`${cl.am}]> ${cl.rd}Error moving failed account to error file: ${error.message}${cl.rt}`, 'error');
+        }
+    }
+
     async LoginAllAccounts() {
         console.clear();
         this.CoderMark();
         this.log(`${cl.yl}Login To All Accounts With Proxy Connection Mode Enabled!\n\n${cl.rt}`);
 
-        const MAX_RETRIES = 3;
-        const CONCURRENT_LOGINS = 5;
+        const MAX_RETRIES = 2;
+        const CONCURRENT_LOGINS = 3;
         const RETRY_DELAY = 2000;
 
         const proxies = await this.validateAccountsAndProxies();
@@ -517,11 +598,7 @@ class TeneoBot {
 
         const loginWithRetry = async (account, proxy, retryCount = 0) => {
             try {
-                const {
-                    access_token,
-                    userId,
-                    proxyIP
-                } = await this.login(account, proxy);
+                const { access_token, userId, proxyIP } = await this.login(account, proxy);
                 accountData.push({
                     email: account.email,
                     userId,
@@ -536,6 +613,7 @@ class TeneoBot {
                     return loginWithRetry(account, proxy, retryCount + 1);
                 }
                 this.log(`${cl.am}]> ${cl.rd}Error with account ${cl.rt}${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
+                await this.moveFailedAccountToError(account, proxy);
                 return false;
             }
         };
@@ -559,6 +637,7 @@ class TeneoBot {
         await this.CoderMark();
         await this.runWithCurrentSession();
     }
+
 
     async runSingleAccount() {
         console.clear();
