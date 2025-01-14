@@ -1,7 +1,7 @@
 /**
 ########################################################
 #                                                      #
-#   CODE  : Teneo Node Bot v1.0 (Exstension v2.0.0)    #
+#   CODE  : Teneo Node Bot v1.1 (Exstension v2.0.0)    #
 #   NodeJs: v22.9.0                                    #
 #   Author: Furqonflynn (cmalf)                        #
 #   TG    : https://t.me/furqonflynn                   #
@@ -69,7 +69,7 @@ class TeneoBot {
         this.CoderMarkPrinted = false;
         this.proxyBackupList = [];
         this.maxProxyRetries = 3;
-        this.version = 'v2.0';
+        this.version = 'v0.2';
 
         this.logger = pino(pretty({
             colorize: true,
@@ -173,7 +173,7 @@ class TeneoBot {
 ╰╯╱╱╰━━┻╯╰━╮┣━━┻╯╰┻╯╱╱╰━┻━╮╭┻╯╰┻╯╰╯${cl.rt}
 ╱╱╱╱╱╱╱╱╱╱╱┃┃╱╱╱╱╱╱╱╱╱╱╱╭━╯┃${cl.am}{${cl.rt}cmalf${cl.am}}${cl.rt}
 ╱╱╱╱╱╱╱╱╱╱╱╰╯╱╱╱╱╱╱╱╱╱╱╱╰━━╯
-\n${cl.rt}${cl.gb} Teneo Node Bot ${cl.gl}JS ${cl.bl}v1.0 ${cl.rt}
+\n${cl.rt}${cl.gb} Teneo Node Bot ${cl.gl}JS ${cl.bl}v1.1 ${cl.rt}
     \n${cl.gr}--------------------------------------
     \n${cl.yl}[+]${cl.rt} DM : ${cl.bl}https://t.me/furqonflynn
     \n${cl.yl}[+]${cl.rt} GH : ${cl.bl}https://github.com/cmalf/
@@ -201,7 +201,7 @@ class TeneoBot {
 
     async getProxyAgent(proxy) {
         if (!proxy) {
-            return null;
+            return undefined;
         }
 
         if (proxy.startsWith('http://') || proxy.startsWith('https://')) {
@@ -408,14 +408,35 @@ class TeneoBot {
             agent,
             headers: {
                 'Origin': 'chrome-extension://emcclcoaglgcpoognfiggmhnhgabppkm',
-                'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
+                'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
+                'Upgrade': 'websocket',
+                'Connection': 'Upgrade',
+                'Sec-WebSocket-Version': '13',
+                'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits'
             },
-            handshakeTimeout: 30000
+            handshakeTimeout: 30000,
+            maxPayload: 1024 * 1024,
+            followRedirects: true,
+            perMessageDeflate: {
+                clientNoContextTakeover: true,
+                serverNoContextTakeover: true,
+                clientMaxWindowBits: 10,
+                concurrencyLimit: 10
+            }
         };
 
         const ws = new WebSocket(wsUrl, wsOptions);
 
+        // Set up a connection timeout
+        const connectionTimeout = setTimeout(() => {
+            if (ws.readyState !== WebSocket.OPEN) {
+                ws.terminate();
+                throw new Error('WebSocket connection timeout');
+            }
+        }, wsOptions.handshakeTimeout);
+
         ws.on('open', () => {
+            clearTimeout(connectionTimeout);
             this.log(`${cl.am}]> ${cl.gl}WebSocket connected ${cl.rt}for ${this.hideEmail(account.email)}`);
 
             ws.pingInterval = setInterval(() => {
@@ -430,10 +451,23 @@ class TeneoBot {
         ws.on('message', (data) => {
             try {
                 const message = JSON.parse(data);
-                if (message.message === "Connected successfully") {
-                    this.log(`${cl.am}]> ${cl.rt}${this.hideEmail(account.email)} ${cl.gl}- Connected: ${cl.am}${message.pointsToday} ${cl.rt}points today, ${cl.am}${message.pointsTotal} ${cl.rt}total points`);
-                } else if (message.message === "Pulse from server") {
-                    this.log(`${cl.am}]> ${cl.rt}${this.hideEmail(account.email)} ${cl.bl}- Pulse: ${cl.am}${message.pointsToday} ${cl.rt}points today, ${cl.am}${message.pointsTotal} ${cl.rt}total points`);
+                const email = this.hideEmail(account.email);
+                const baseLogStr = `${cl.am}]> ${cl.rt}${email}`;
+                const pointsStr = `${cl.am}${message.pointsToday} ${cl.rt}points today, ${cl.am}${message.pointsTotal} ${cl.rt}total points`;
+
+                switch (message.message) {
+                    case "Connected successfully":
+                        this.log(`${baseLogStr} ${cl.gl}- Connected: ${pointsStr}`);
+                        break;
+                        
+                    case "Pulse from server":
+                        const heartbeatsStr = message.heartbeats ? `, ${cl.am}${message.heartbeats} ${cl.rt}heartbeats` : '';
+                        this.log(`${baseLogStr} ${cl.bl}- Pulse: ${pointsStr}${heartbeatsStr}`);
+                        break;
+
+                    default:
+                        // Optional: Log unknown message types for debugging
+                        this.log(`${baseLogStr} - Received message: ${JSON.stringify(message)}`);
                 }
             } catch (error) {
                 this.log(`${cl.am}]> ${cl.rd}Error parsing message ${cl.rt}for ${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
