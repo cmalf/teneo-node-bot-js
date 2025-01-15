@@ -281,7 +281,7 @@ class TeneoBot {
         }
     }
 
-    async login(account, proxy, retries = 3) {
+    async login(account, proxy, retries = 2) {
         const agent = await this.getProxyAgent(proxy);
 
         for (let attempt = 1; attempt <= retries; attempt++) {
@@ -562,6 +562,7 @@ class TeneoBot {
             }
 
             const errorFilePath = path.join(__dirname, 'accounts_error.json');
+            const accountsFilePath = path.join(__dirname, 'accounts.js');
             let errorAccounts = [];
             
             try {
@@ -587,16 +588,42 @@ class TeneoBot {
                     'utf-8'
                 );
 
-                // Remove from DataAllAccount.js
+                // Handle DataAllAccount.js
                 const dataAllAccountPath = path.join(__dirname, 'DataAllAccount.js');
                 try {
-                    const { DataAllAccount } = require('./DataAllAccount.js');
-                    const updatedAccounts = DataAllAccount.filter(acc => acc.email !== account.email);
-                    
-                    const fileContent = `const DataAllAccount = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
-                    await fs.writeFile(dataAllAccountPath, fileContent, 'utf-8');
+                    let dataAllAccountExists = true;
+                    let DataAllAccount = [];
+
+                    try {
+                        const fileStats = await fs.stat(dataAllAccountPath);
+                        if (fileStats.size === 0) {
+                            dataAllAccountExists = false;
+                        } else {
+                            ({ DataAllAccount } = require('./DataAllAccount.js'));
+                        }
+                    } catch (error) {
+                        dataAllAccountExists = false;
+                        const initialContent = 'const DataAllAccount = [];\n\nmodule.exports = { DataAllAccount };';
+                        await fs.writeFile(dataAllAccountPath, initialContent, 'utf-8');
+                    }
+
+                    if (dataAllAccountExists) {
+                        const updatedAccounts = DataAllAccount.filter(acc => acc.email !== account.email);
+                        const fileContent = `const DataAllAccount = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
+                        await fs.writeFile(dataAllAccountPath, fileContent, 'utf-8');
+                    }
                 } catch (error) {
                     this.log(`${cl.am}]> ${cl.rd}Error updating DataAllAccount.js: ${error.message}${cl.rt}`, 'error');
+                }
+
+                // Handle accounts.js
+                try {
+                    let { accountLists } = require('./accounts.js');
+                    const updatedAccountLists = accountLists.filter(acc => acc.email !== account.email);
+                    const accountsContent = `const accountLists = ${JSON.stringify(updatedAccountLists, null, 2)};\n\nmodule.exports = { accountLists };`;
+                    await fs.writeFile(accountsFilePath, accountsContent, 'utf-8');
+                } catch (error) {
+                    this.log(`${cl.am}]> ${cl.rd}Error updating accounts.js: ${error.message}${cl.rt}`, 'error');
                 }
 
                 // Remove proxy if exists
@@ -620,6 +647,12 @@ class TeneoBot {
             throw error;
         }
     }
+    
+    async saveAccountData(accountData) {
+        const filePath = path.join(__dirname, 'DataAllAccount.js');
+        const fileContent = `const DataAllAccount = ${JSON.stringify(accountData, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
+        await fs.writeFile(filePath, fileContent, 'utf-8');
+    }
 
     async LoginAllAccounts() {
         console.clear();
@@ -627,8 +660,8 @@ class TeneoBot {
         this.log(`${cl.yl}Login To All Accounts With Proxy Connection Mode Enabled!\n\n${cl.rt}`);
 
         const MAX_RETRIES = 2;
-        const CONCURRENT_LOGINS = 3;
-        const RETRY_DELAY = 2000;
+        const CONCURRENT_LOGINS = 1;
+        const RETRY_DELAY = 1000;
 
         const proxies = await this.validateAccountsAndProxies();
         const accountData = [];
