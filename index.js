@@ -61,7 +61,7 @@ const cl = {
 class TeneoBot {
     constructor() {
         this.wita = 'Asia/Makassar'; // "Adjust for Your Time Zone (e.g., 'Asia/Makassar' in Bali, Indonesia)"
-        this.apiKey = 'OwAG3kib1ivOJG4Y0OCZ8lJETa6ypvsDtGmdhcjA';
+        this.apiKey = 'OwAG3kib1ivOJG4Y0OCZ8lJETa6ypvsDtGmdhcjB';
         this.loginUrl = 'https://auth.teneo.pro/api/login';
         this.userUrl = 'https://auth.teneo.pro/api/user';
         this.websocketUrl = 'secure.ws.teneo.pro';
