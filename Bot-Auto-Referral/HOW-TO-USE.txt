@@ -1,0 +1,47 @@
+
+//==========================================//
+
+ BOT AUTO SIGNUP AND AUTO REFFERAL TENEO NODE
+     	        PREMIUM
+
+//==========================================//
+              HOW TO USE?
+//==========================================//
+
+# CONFIGURATION
+
+- Open Folder Config
+
+  # Setup Proxies!
+
+	- add some Proxy in proxy.txt 
+	- at least more than 10 proxies (For account creation under 100)
+	- To create a Teneo account, if you use one network IP to register multiple accounts
+	  no problem, but it is better to use more than 10 proxies for random use. if you want to create 1000 accounts, you can use more than 50 proxies.
+
+ # Setup Reff code
+
+ 	- add your reffcode to reff-code.json
+
+ # Done.
+
+# RUN THE BOT SCRIPT
+
+ # Install Dependencies
+
+ 	- npm install
+
+ # Run The Bot Script
+
+ 	- npm start
+ 	- select reffcode (if you add more than one code)
+ 	- then input the number of accounts you want to create, wait until all accounts are created.
+ 	- Done
+
+# How to run Account After Creation
+
+	- Use Teneo Bot
+	- Clone Repository : https://github.com/cmalf/teneo-node-bot-js.git
+	- Open Folder Accounts and Copy file accounts.js to Teneo Bot
+	- then Login All Account (Don't forget to setup proxies First on Teneo Bot, to run a Teneo account, the rules are different, requiring 1 proxy for one account)
+	- done.
