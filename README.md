@@ -113,7 +113,7 @@ npm start
 - Earn Teneo Points
 
 ![Screenshot 2025-01-02 at 03 52 19](https://github.com/user-attachments/assets/1bc73c7a-fa69-46ea-a91f-4d748006babf)
-
+<!--
 ## 📢 Additional information
 
 > [!TIP]
@@ -136,5 +136,5 @@ npm start
      - `protocol://username:password@hostname:port`
      - or just look the ss below
      - ![Screenshot 2024-12-06 at 16 24 31](https://github.com/user-attachments/assets/c9d552f1-7241-4705-8580-30a88aae8638)
-
+-->
 
