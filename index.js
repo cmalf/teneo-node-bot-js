@@ -1,8 +1,8 @@
 /**
 ########################################################
 #                                                      #
-#   CODE  : Teneo Node Bot v1.1 (Exstension v2.0.0)    #
-#   NodeJs: v22.9.0                                    #
+#   CODE  : Teneo Node Bot v1.2 (Exstension v2.0.0)    #
+#   NodeJs: v23.6.1                                    #
 #   Author: Furqonflynn (cmalf)                        #
 #   TG    : https://t.me/furqonflynn                   #
 #   GH    : https://github.com/cmalf                   #
@@ -43,6 +43,7 @@ const readline = require('readline');
 const {
     accountLists
 } = require('./accounts.js');
+const { config, ServiceChoice } = require('./captchaconfig.js');
 
 const cl = {
     bl: '\x1b[38;5;27m',
@@ -70,6 +71,16 @@ class TeneoBot {
         this.proxyBackupList = [];
         this.maxProxyRetries = 3;
         this.version = 'v0.2';
+
+        // Captcha bypass configuration: 'capmonster', '2captcha', or 'anticaptcha'
+        this.captchaServiceChoice = ServiceChoice;
+        this.capmonsterApiKey = config.CAPMONSTER_API_KEY;
+        this.twoCaptchaApiKey = config.TWO_CAPTCHA_API_KEY;
+        this.antiCaptchaApiKey = config.ANTICAPTCHA_API_KEY;
+
+        // Cloudflare Turnstile configuration
+        this.turnstileWebsiteURL = 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/yauni/0x4AAAAAAAkhmGkb2VS6MRU0/light/fbE/new/normal/auto/';
+        this.turnstileSiteKey = '0x4AAAAAAAkhmGkb2VS6MRU0';
 
         this.initializeLogger();
 
@@ -203,7 +214,7 @@ class TeneoBot {
 ╰╯╱╱╰━━┻╯╰━╮┣━━┻╯╰┻╯╱╱╰━┻━╮╭┻╯╰┻╯╰╯${cl.rt}
 ╱╱╱╱╱╱╱╱╱╱╱┃┃╱╱╱╱╱╱╱╱╱╱╱╭━╯┃${cl.am}{${cl.rt}cmalf${cl.am}}${cl.rt}
 ╱╱╱╱╱╱╱╱╱╱╱╰╯╱╱╱╱╱╱╱╱╱╱╱╰━━╯
-\n${cl.rt}${cl.gb} Teneo Node Bot ${cl.gl}JS ${cl.bl}v1.1 ${cl.rt}
+\n${cl.rt}${cl.gb} Teneo Node Bot ${cl.gl}JS ${cl.bl}v1.2 ${cl.rt}
     \n${cl.gr}--------------------------------------
     \n${cl.yl}[+]${cl.rt} DM : ${cl.bl}https://t.me/furqonflynn
     \n${cl.yl}[+]${cl.rt} GH : ${cl.bl}https://github.com/cmalf/
@@ -281,49 +292,232 @@ class TeneoBot {
         }
     }
 
-    async login(account, proxy, retries = 2) {
+    // Solve Cloudflare Turnstile Captcha via the selected bypass service with retries (max 5 attempts)
+      async solveTurnstileCaptcha(proxy, maxRetries = 5) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            let token;
+            switch (this.captchaServiceChoice) {
+              case 'capmonster':
+                token = await this.solveCaptchaCapmonster(proxy);
+                break;
+              case '2captcha':
+                token = await this.solveCaptcha2Captcha(proxy);
+                break;
+              case 'anticaptcha':
+                token = await this.solveCaptchaAntiCaptcha(proxy);
+                break;
+              default:
+                throw new Error('Invalid captchaServiceChoice');
+            }
+            if (token) {
+              return token;
+            } else {
+              throw new Error('Empty token received');
+            }
+          } catch (error) {
+            this.log(`Captcha bypass failed on attempt ${attempt}: ${error.message}`, 'error');
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+          }
+        }
+        throw new Error('Captcha bypass failed after maximum retries.');
+      }
+
+      // Implementation for capmonster.cloud captcha bypass
+      async solveCaptchaCapmonster(proxy) {
+        const agent = await this.getProxyAgent(proxy);
+        // Create task
+        const createTaskEndpoint = 'https://api.capmonster.cloud/createTask';
+        const getTaskResultEndpoint = 'https://api.capmonster.cloud/getTaskResult';
+        const createPayload = {
+          clientKey: this.capmonsterApiKey,
+          task: {
+            type: 'TurnstileTask',
+            websiteURL: this.turnstileWebsiteURL,
+            websiteKey: this.turnstileSiteKey
+          }
+        };
+
+        const createResponse = await axios.post(createTaskEndpoint, createPayload, {
+          httpsAgent: agent,
+          timeout: 30000
+        });
+        if (!createResponse.data || createResponse.data.errorId !== 0) {
+          throw new Error('Error creating task on capmonster');
+        }
+        const taskId = createResponse.data.taskId;
+
+        // Polling for result
+        for (let i = 0; i < 20; i++) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const resultPayload = {
+            clientKey: this.capmonsterApiKey,
+            taskId: taskId
+          };
+          const resultResponse = await axios.post(getTaskResultEndpoint, resultPayload, {
+            httpsAgent: agent,
+            timeout: 30000
+          });
+          if (resultResponse.data.status === 'processing') {
+            continue;
+          } else if (resultResponse.data.status === 'ready') {
+            return resultResponse.data.solution.token;
+          } else {
+            throw new Error('Unknown status returned from capmonster');
+          }
+        }
+        throw new Error('Capmonster: Captcha solving timed out');
+      }
+
+      // Implementation for 2captcha captcha bypass
+      async solveCaptcha2Captcha(proxy) {
+        const agent = await this.getProxyAgent(proxy);
+        // Submit captcha request
+        const inEndpoint = 'http://2captcha.com/in.php';
+        const resEndpoint = 'http://2captcha.com/res.php';
+
+        // Construct request params (encoded as URL query parameters)
+        const params = new URLSearchParams();
+        params.append('key', this.twoCaptchaApiKey);
+        params.append('method', 'turnstile');
+        params.append('sitekey', this.turnstileSiteKey);
+        params.append('pageurl', this.turnstileWebsiteURL);
+        // Optionally, proxy parameters can be passed if required
+
+        const inResponse = await axios.post(inEndpoint, params, {
+          httpsAgent: agent,
+          timeout: 30000
+        });
+        if (!inResponse.data || !inResponse.data.includes('OK|')) {
+          throw new Error('Error submitting captcha to 2captcha');
+        }
+        const captchaId = inResponse.data.split('|')[1];
+
+        // Polling for result
+        for (let i = 0; i < 24; i++) {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          const resParams = new URLSearchParams();
+          resParams.append('key', this.twoCaptchaApiKey);
+          resParams.append('action', 'get');
+          resParams.append('id', captchaId);
+          const resResponse = await axios.get(`${resEndpoint}?${resParams.toString()}`, {
+            httpsAgent: agent,
+            timeout: 30000
+          });
+          if (resResponse.data === 'CAPCHA_NOT_READY') {
+            continue;
+          } else if (resResponse.data.includes('OK|')) {
+            return resResponse.data.split('|')[1];
+          } else {
+            throw new Error('Error retrieving captcha solution from 2captcha');
+          }
+        }
+        throw new Error('2captcha: Captcha solving timed out');
+      }
+
+      // Implementation for anticaptcha captcha bypass
+      async solveCaptchaAntiCaptcha(proxy) {
+        const agent = await this.getProxyAgent(proxy);
+        // Create task
+        const createTaskEndpoint = 'https://api.anti-captcha.com/createTask';
+        const getTaskResultEndpoint = 'https://api.anti-captcha.com/getTaskResult';
+
+        const createPayload = {
+          clientKey: this.antiCaptchaApiKey,
+          task: {
+            type: 'TurnstileTaskProxyless',
+            websiteURL: this.turnstileWebsiteURL,
+            websiteKey: this.turnstileSiteKey
+          }
+        };
+
+        const createResponse = await axios.post(createTaskEndpoint, createPayload, {
+          httpsAgent: agent,
+          timeout: 30000
+        });
+        if (!createResponse.data || createResponse.data.errorId !== 0) {
+          throw new Error('Error creating task on anticaptcha');
+        }
+        const taskId = createResponse.data.taskId;
+
+        // Polling for result
+        for (let i = 0; i < 20; i++) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const resultPayload = {
+            clientKey: this.antiCaptchaApiKey,
+            taskId: taskId
+          };
+          const resultResponse = await axios.post(getTaskResultEndpoint, resultPayload, {
+            httpsAgent: agent,
+            timeout: 30000
+          });
+          if (resultResponse.data.status === 'processing') {
+            continue;
+          } else if (resultResponse.data.status === 'ready') {
+            return resultResponse.data.solution.token;
+          } else {
+            throw new Error('Unknown status returned from anticaptcha');
+          }
+        }
+        throw new Error('Anticaptcha: Captcha solving timed out');
+      }
+
+      // New login method using Cloudflare Turnstile captcha bypass
+      async login(account, proxy, retries = 2) {
         const agent = await this.getProxyAgent(proxy);
 
         for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-                const loginResponse = await axios.post(this.loginUrl, {
-                    email: account.email,
-                    password: account.password
-                }, {
-                    headers: {
-                        'x-api-key': this.apiKey
-                    },
-                    httpsAgent: agent,
-                    timeout: 30000
-                });
+          try {
+            // Solve captcha bypass with max 5 retries internally
+            const turnstileToken = await this.solveTurnstileCaptcha(proxy, 5);
 
-                const access_token = loginResponse.data.access_token;
+            // Login payload includes the captcha token
+            const payload = {
+              email: account.email,
+              password: account.password,
+              turnstileToken: turnstileToken
+            };
 
-                const userResponse = await axios.get(this.userUrl, {
-                    headers: {
-                        'Authorization': `Bearer ${access_token}`,
-                        'x-api-key': this.apiKey
-                    },
-                    httpsAgent: agent
-                });
-
-                const userId = userResponse.data.id;
-                const proxyIP = await this.getProxyIP(proxy);
-
-                return {
-                    access_token,
-                    userId,
-                    proxyIP
-                };
-            } catch (error) {
-                if (attempt === retries) {
-                    throw error;
-                }
-                this.log(`${cl.am}]> ${cl.yl} Retry attempt ${attempt} ${cl.rt}for ${this.hideEmail(account.email)}`, 'warn');
-                await new Promise(resolve => setTimeout(resolve, 5000));
+            const loginResponse = await axios.post(this.loginUrl, payload, {
+              headers: {
+                'x-api-key': this.apiKey,
+                'Content-Type': 'application/json'
+              },
+              httpsAgent: agent,
+              timeout: 30000
+            });
+            const access_token = loginResponse.data.access_token;
+            if (!access_token) {
+              throw new Error('No access token returned from login');
             }
+            const userResponse = await axios.get(this.userUrl, {
+              headers: {
+                'Authorization': `Bearer ${access_token}`,
+                'x-api-key': this.apiKey
+              },
+              httpsAgent: agent,
+              timeout: 30000
+            });
+
+            const userId = userResponse.data.id;
+            const proxyIP = await this.getProxyIP(proxy);
+
+            return {
+              access_token,
+              userId,
+              proxyIP
+            };
+          } catch (error) {
+            this.log(`Retry attempt ${attempt} for ${this.hideEmail(account.email)} due to error: ${error.message}`, 'warn');
+            if (attempt === retries) {
+              throw error;
+            }
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
         }
-    }
+      }
 
     async loadProxyBackups() {
         try {
@@ -431,21 +625,11 @@ class TeneoBot {
                     agent,
                     headers: {
                         'Origin': 'chrome-extension://emcclcoaglgcpoognfiggmhnhgabppkm',
-                        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)],
-                        'Upgrade': 'websocket',
-                        'Connection': 'Upgrade',
-                        'Sec-WebSocket-Version': '13',
-                        'Sec-WebSocket-Extensions': 'permessage-deflate; client_max_window_bits'
+                        'User-Agent': userAgents[Math.floor(Math.random() * userAgents.length)]
                     },
                     handshakeTimeout: 30000,
-                    maxPayload: 1024 * 1024,
                     followRedirects: true,
-                    perMessageDeflate: {
-                        clientNoContextTakeover: true,
-                        serverNoContextTakeover: true,
-                        clientMaxWindowBits: 10,
-                        concurrencyLimit: 10
-                    }
+                    rejectUnauthorized: false
                 };
 
                 const ws = new WebSocket(wsUrl, wsOptions);
