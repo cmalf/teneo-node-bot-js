@@ -79,7 +79,7 @@ class TeneoBot {
         this.antiCaptchaApiKey = config.ANTICAPTCHA_API_KEY;
 
         // Cloudflare Turnstile configuration
-        this.turnstileWebsiteURL = 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/yauni/0x4AAAAAAAkhmGkb2VS6MRU0/light/fbE/new/normal/auto/';
+        this.turnstileWebsiteURL = 'https://dashboard.teneo.pro/auth';
         this.turnstileSiteKey = '0x4AAAAAAAkhmGkb2VS6MRU0';
 
         this.initializeLogger();
