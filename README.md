@@ -12,9 +12,11 @@
 
 # ᝰ.ᐟ teneo-node-bot-js
 
->[!TIP]
-> ## Teneo Server Now Normal <br>
-> ## Please Update Your Bot Script to version 1.1`
+>[!WARNING]
+> ## For now login and run websocket separately <br>
+> ## Please Update Your Bot Script to version 1.2`
+> ## After Login, copy file DataAllAccount.js to main Folder.
+> ## Run the script as usual!
 > ## Everything is Good now!
 
 > [!TIP]
