@@ -1,0 +1,20 @@
+{
+  "name": "Teneo-Login-Bot-Js",
+  "version": "1.0.0",
+  "description": "https://github.com/cmalf/teneo-Login-bot-js",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "furqonflynn(cmalf)",
+  "license": "GPL-3.0",
+  "dependencies": {
+    "axios": "^1.8.1",
+    "fs": "^0.0.1-security",
+    "https-proxy-agent": "^7.0.6",
+    "socks-proxy-agent": "^8.0.5",
+    "path": "^0.12.7",
+    "puppeteer-extra-plugin-click-and-wait": "^2.3.3",
+    "puppeteer-real-browser": "^1.4.2"
+  }
+}
