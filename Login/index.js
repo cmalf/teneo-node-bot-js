@@ -174,11 +174,10 @@ function parseProxyURL(proxyUrl) {
 // Utility function to introduce delays (ms)
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-
 async function saveAccountData(newAccountData) {
   try {
     if (!fs.existsSync(DATA_FILE)) {
-      initDataAllAccountFile();
+      await initDataAllAccountFile();
     }
     let currentData = [];
     if (fs.existsSync(DATA_FILE)) {
@@ -248,7 +247,7 @@ async function performLogin(account) {
   try {
     await page.goto("https://dashboard.teneo.pro/auth", { waitUntil: "domcontentloaded" });
     
-    //poll for turnstile token every 8 seconds.
+    // Poll for turnstile token every 8 seconds.
     console.log(`${Colors.Neon}]> ${Colors.Gold}Waiting for Cloudflare Turnstile token...${Colors.RESET}`);
     const tokenHandle = await page.waitForFunction(() => {
       const input = document.querySelector('input[name="cf-turnstile-response"]');
@@ -280,6 +279,7 @@ async function performLogin(account) {
       console.log(`${Colors.Neon}]> ${Colors.Green}Login successful for ${Colors.Teal}${maskEmail(account.email)}${Colors.RESET}`);
       console.log(`${Colors.Neon}]> ${Colors.RESET}cf-turnstile-response token: ${Colors.Dim}${Colors.Teal}${token}${Colors.RESET}`);
       console.log(`${Colors.Neon}]> ${Colors.RESET}token-Login-response: ${Colors.Dim}${Colors.Blue}${access_token}${Colors.RESET}`);
+      // Save account data immediately after successful login
       await saveAccountData({ email: account.email, access_token });
     } else {
       console.error(`${Colors.Neon}]> ${Colors.Red}Login failed for ${Colors.Teal}${maskEmail(account.email)}${Colors.Red} due to missing access token in response.${Colors.RESET}`);
@@ -317,17 +317,14 @@ async function loginWithRetry(account, maxRetries = 5) {
 }
 
 async function main() {
+  await initDataAllAccountFile();
 
-  initDataAllAccountFile();
-
-  const results = [];
   for (let i = 0; i < accountLists.length; i++) {
     const account = accountLists[i];
     try {
       console.log(`${Colors.Neon}]> ${Colors.Gold}Processing account ${Colors.RESET}${i + 1}${Colors.Gold} of ${Colors.RESET}${accountLists.length}: ${Colors.Teal}${maskEmail(account.email)}${Colors.RESET}`);
       // Use retry logic when attempting login
-      const result = await loginWithRetry(account, 5);
-      results.push(result);
+      await loginWithRetry(account, 5);
     } catch (error) {
       console.error(`Error processing account ${maskEmail(account.email)}: ${Colors.Red}${error.message}${Colors.RESET}`);
     }
@@ -338,12 +335,7 @@ async function main() {
     }
   }
 
-  // Save all successful account login data
-  if (results.length > 0) {
-    await saveAccountData(results);
-  } else {
-    console.log(`${Colors.Neon}]> ${Colors.Gold}No account data to save.`);
-  }
+  console.log(`${Colors.Neon}]> ${Colors.Green}All account login processes are completed. Data has been saved individually during processing.${Colors.RESET}`);
 }
 
 console.clear();
