@@ -30,20 +30,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const WebSocket = require('ws');
 const axios = require('axios');
-const {
-    DateTime
-} = require('luxon');
-const {
-    HttpsProxyAgent
-} = require('https-proxy-agent');
-const {
-    SocksProxyAgent
-} = require('socks-proxy-agent');
+const { DateTime } = require('luxon');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 const readline = require('readline');
-const {
-    accountLists
-} = require('./accounts.js');
-const { config, ServiceChoice } = require('./captchaconfig.js');
+const { DataAllAccount } = require('./DataAllAccount');
 
 const cl = {
     bl: '\x1b[38;5;27m',
@@ -61,26 +52,14 @@ const cl = {
 
 class TeneoBot {
     constructor() {
-        this.wita = 'Asia/Makassar'; // "Adjust for Your Time Zone (e.g., 'Asia/Makassar' in Bali, Indonesia)"
+        this.wita = 'Asia/Makassar'; // Adjust for Your Time Zone (e.g., 'Asia/Makassar' in Bali, Indonesia)
         this.apiKey = 'OwAG3kib1ivOJG4Y0OCZ8lJETa6ypvsDtGmdhcjB';
         this.loginUrl = 'https://auth.teneo.pro/api/login';
         this.userUrl = 'https://auth.teneo.pro/api/user';
         this.websocketUrl = 'secure.ws.teneo.pro';
         this.activeConnections = new Map();
         this.CoderMarkPrinted = false;
-        this.proxyBackupList = [];
-        this.maxProxyRetries = 3;
         this.version = 'v0.2';
-
-        // Captcha bypass configuration: 'capmonster', '2captcha', or 'anticaptcha'
-        this.captchaServiceChoice = ServiceChoice;
-        this.capmonsterApiKey = config.CAPMONSTER_API_KEY;
-        this.twoCaptchaApiKey = config.TWO_CAPTCHA_API_KEY;
-        this.antiCaptchaApiKey = config.ANTICAPTCHA_API_KEY;
-
-        // Cloudflare Turnstile configuration
-        this.turnstileWebsiteURL = 'https://dashboard.teneo.pro/auth';
-        this.turnstileSiteKey = '0x4AAAAAAAkhmGkb2VS6MRU0';
 
         this.initializeLogger();
 
@@ -89,15 +68,14 @@ class TeneoBot {
             output: process.stdout
         });
 
+        // Run all accounts using current session
         TeneoBot.prototype.runWithCurrentSession = async () => {
             console.clear();
             this.CoderMark();
             this.log(`${cl.am}]> ${cl.yl}Proxy Connection Mode Enabled!\n\n${cl.yl}]-> ${cl.am}Run All Accounts Using Current Session! ${cl.rt}\n`);
             try {
                 const dataPath = path.join(__dirname, 'DataAllAccount.js');
-                const {
-                    DataAllAccount
-                } = require(dataPath);
+                const { DataAllAccount } = require(dataPath);
                 const proxies = await this.validateAccountsAndProxies();
 
                 if (!DataAllAccount || !Array.isArray(DataAllAccount)) {
@@ -108,7 +86,7 @@ class TeneoBot {
                 for (let i = 0; i < DataAllAccount.length; i++) {
                     const accountData = DataAllAccount[i];
                     const proxy = proxies[i].trim();
-                    const account = accountLists.find(acc => acc.email === accountData.email);
+                    const account = DataAllAccount.find(acc => acc.email === accountData.email);
 
                     if (!account) {
                         this.log(`${cl.am}]> ${cl.bl}Account ${cl.rt}${this.hideEmail(accountData.email)} ${cl.rd}not found in account list`, 'error');
@@ -222,7 +200,7 @@ class TeneoBot {
     \n${cl.yl}]-> ${cl.am}{ ${cl.rt}Teneo Extension${cl.bl} v2.0.0${cl.am} } ${cl.rt}
     \n${cl.gr}--------------------------------------${cl.rt}
             `);
-            this.CoderMarkPrinted = false;
+            this.CoderMarkPrinted = true;
         }
     }
 
@@ -276,262 +254,20 @@ class TeneoBot {
             const proxyContent = await fs.readFile(proxyFilePath, 'utf-8');
             const proxies = proxyContent.split('\n').filter(Boolean);
 
-            if (accountLists.length !== proxies.length) {
+            if (DataAllAccount.length !== proxies.length) {
                 this.log(`${cl.rt}---------------------------------------------------`);
-                this.log(`${cl.am}]> ${cl.rt}Mismatch: ${cl.rt}${accountLists.length} ${cl.br}accounts ${cl.rt}but ${cl.br}${proxies.length} proxies. ${cl.rd}Exiting...`, 'error');
+                this.log(`${cl.am}]> ${cl.rt}Mismatch: ${cl.rt}${DataAllAccount.length} ${cl.br}accounts ${cl.rt}but ${cl.br}${proxies.length} proxies. ${cl.rd}Exiting...`, 'error');
                 this.log(`${cl.rt}---------------------------------------------------\n`);
                 process.exit(1);
             }
             this.log(`${cl.rt}---------------------------------------------------`);
-            this.log(`${cl.am}]> ${cl.rt}Validation ${cl.gl}successful${cl.rt}: ${accountLists.length} ${cl.br}accounts ${cl.rt}and ${proxies.length} ${cl.br}proxies.`);
+            this.log(`${cl.am}]> ${cl.rt}Validation ${cl.gl}successful${cl.rt}: ${DataAllAccount.length} ${cl.br}accounts ${cl.rt}and ${proxies.length} ${cl.br}proxies.`);
             this.log(`${cl.rt}---------------------------------------------------\n`);
             return proxies;
         } catch (error) {
             this.log(`${cl.am}]> ${cl.rd} Error reading proxy file: ${error.message}`, 'error');
             process.exit(1);
         }
-    }
-
-    // Solve Cloudflare Turnstile Captcha via the selected bypass service with retries (max 5 attempts)
-      async solveTurnstileCaptcha(proxy, maxRetries = 5) {
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            let token;
-            switch (this.captchaServiceChoice) {
-              case 'capmonster':
-                token = await this.solveCaptchaCapmonster(proxy);
-                break;
-              case '2captcha':
-                token = await this.solveCaptcha2Captcha(proxy);
-                break;
-              case 'anticaptcha':
-                token = await this.solveCaptchaAntiCaptcha(proxy);
-                break;
-              default:
-                throw new Error('Invalid captchaServiceChoice');
-            }
-            if (token) {
-              return token;
-            } else {
-              throw new Error('Empty token received');
-            }
-          } catch (error) {
-            this.log(`Captcha bypass failed on attempt ${attempt}: ${error.message}`, 'error');
-            if (attempt < maxRetries) {
-              await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-          }
-        }
-        throw new Error('Captcha bypass failed after maximum retries.');
-      }
-
-      // Implementation for capmonster.cloud captcha bypass
-      async solveCaptchaCapmonster(proxy) {
-        const agent = await this.getProxyAgent(proxy);
-        // Create task
-        const createTaskEndpoint = 'https://api.capmonster.cloud/createTask';
-        const getTaskResultEndpoint = 'https://api.capmonster.cloud/getTaskResult';
-        const createPayload = {
-          clientKey: this.capmonsterApiKey,
-          task: {
-            type: 'TurnstileTask',
-            websiteURL: this.turnstileWebsiteURL,
-            websiteKey: this.turnstileSiteKey
-          }
-        };
-
-        const createResponse = await axios.post(createTaskEndpoint, createPayload, {
-          httpsAgent: agent,
-          timeout: 30000
-        });
-        if (!createResponse.data || createResponse.data.errorId !== 0) {
-          throw new Error('Error creating task on capmonster');
-        }
-        const taskId = createResponse.data.taskId;
-
-        // Polling for result
-        for (let i = 0; i < 20; i++) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          const resultPayload = {
-            clientKey: this.capmonsterApiKey,
-            taskId: taskId
-          };
-          const resultResponse = await axios.post(getTaskResultEndpoint, resultPayload, {
-            httpsAgent: agent,
-            timeout: 30000
-          });
-          if (resultResponse.data.status === 'processing') {
-            continue;
-          } else if (resultResponse.data.status === 'ready') {
-            return resultResponse.data.solution.token;
-          } else {
-            throw new Error('Unknown status returned from capmonster');
-          }
-        }
-        throw new Error('Capmonster: Captcha solving timed out');
-      }
-
-      // Implementation for 2captcha captcha bypass
-      async solveCaptcha2Captcha(proxy) {
-        const agent = await this.getProxyAgent(proxy);
-        // Submit captcha request
-        const inEndpoint = 'http://2captcha.com/in.php';
-        const resEndpoint = 'http://2captcha.com/res.php';
-
-        // Construct request params (encoded as URL query parameters)
-        const params = new URLSearchParams();
-        params.append('key', this.twoCaptchaApiKey);
-        params.append('method', 'turnstile');
-        params.append('sitekey', this.turnstileSiteKey);
-        params.append('pageurl', this.turnstileWebsiteURL);
-        // Optionally, proxy parameters can be passed if required
-
-        const inResponse = await axios.post(inEndpoint, params, {
-          httpsAgent: agent,
-          timeout: 30000
-        });
-        if (!inResponse.data || !inResponse.data.includes('OK|')) {
-          throw new Error('Error submitting captcha to 2captcha');
-        }
-        const captchaId = inResponse.data.split('|')[1];
-
-        // Polling for result
-        for (let i = 0; i < 24; i++) {
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          const resParams = new URLSearchParams();
-          resParams.append('key', this.twoCaptchaApiKey);
-          resParams.append('action', 'get');
-          resParams.append('id', captchaId);
-          const resResponse = await axios.get(`${resEndpoint}?${resParams.toString()}`, {
-            httpsAgent: agent,
-            timeout: 30000
-          });
-          if (resResponse.data === 'CAPCHA_NOT_READY') {
-            continue;
-          } else if (resResponse.data.includes('OK|')) {
-            return resResponse.data.split('|')[1];
-          } else {
-            throw new Error('Error retrieving captcha solution from 2captcha');
-          }
-        }
-        throw new Error('2captcha: Captcha solving timed out');
-      }
-
-      // Implementation for anticaptcha captcha bypass
-      async solveCaptchaAntiCaptcha(proxy) {
-        const agent = await this.getProxyAgent(proxy);
-        // Create task
-        const createTaskEndpoint = 'https://api.anti-captcha.com/createTask';
-        const getTaskResultEndpoint = 'https://api.anti-captcha.com/getTaskResult';
-
-        const createPayload = {
-          clientKey: this.antiCaptchaApiKey,
-          task: {
-            type: 'TurnstileTaskProxyless',
-            websiteURL: this.turnstileWebsiteURL,
-            websiteKey: this.turnstileSiteKey
-          }
-        };
-
-        const createResponse = await axios.post(createTaskEndpoint, createPayload, {
-          httpsAgent: agent,
-          timeout: 30000
-        });
-        if (!createResponse.data || createResponse.data.errorId !== 0) {
-          throw new Error('Error creating task on anticaptcha');
-        }
-        const taskId = createResponse.data.taskId;
-
-        // Polling for result
-        for (let i = 0; i < 20; i++) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-          const resultPayload = {
-            clientKey: this.antiCaptchaApiKey,
-            taskId: taskId
-          };
-          const resultResponse = await axios.post(getTaskResultEndpoint, resultPayload, {
-            httpsAgent: agent,
-            timeout: 30000
-          });
-          if (resultResponse.data.status === 'processing') {
-            continue;
-          } else if (resultResponse.data.status === 'ready') {
-            return resultResponse.data.solution.token;
-          } else {
-            throw new Error('Unknown status returned from anticaptcha');
-          }
-        }
-        throw new Error('Anticaptcha: Captcha solving timed out');
-      }
-
-      // New login method using Cloudflare Turnstile captcha bypass
-      async login(account, proxy, retries = 2) {
-        const agent = await this.getProxyAgent(proxy);
-
-        for (let attempt = 1; attempt <= retries; attempt++) {
-          try {
-            // Solve captcha bypass with max 5 retries internally
-            const turnstileToken = await this.solveTurnstileCaptcha(proxy, 5);
-
-            // Login payload includes the captcha token
-            const payload = {
-              email: account.email,
-              password: account.password,
-              turnstileToken: turnstileToken
-            };
-
-            const loginResponse = await axios.post(this.loginUrl, payload, {
-              headers: {
-                'x-api-key': this.apiKey,
-                'Content-Type': 'application/json'
-              },
-              httpsAgent: agent,
-              timeout: 30000
-            });
-            const access_token = loginResponse.data.access_token;
-            if (!access_token) {
-              throw new Error('No access token returned from login');
-            }
-            const userResponse = await axios.get(this.userUrl, {
-              headers: {
-                'Authorization': `Bearer ${access_token}`,
-                'x-api-key': this.apiKey
-              },
-              httpsAgent: agent,
-              timeout: 30000
-            });
-
-            const userId = userResponse.data.id;
-            const proxyIP = await this.getProxyIP(proxy);
-
-            return {
-              access_token,
-              userId,
-              proxyIP
-            };
-          } catch (error) {
-            this.log(`Retry attempt ${attempt} for ${this.hideEmail(account.email)} due to error: ${error.message}`, 'warn');
-            if (attempt === retries) {
-              throw error;
-            }
-            await new Promise(resolve => setTimeout(resolve, 5000));
-          }
-        }
-      }
-
-    async loadProxyBackups() {
-        try {
-            const backupContent = await fs.readFile(path.join(__dirname, 'proxybackup.txt'), 'utf-8');
-            this.proxyBackupList = backupContent.split('\n').filter(Boolean).map(proxy => proxy.trim());
-            this.log(`${cl.am}]> ${cl.yl}Loaded ${cl.rt}${this.proxyBackupList.length} backup proxies`);
-        } catch (error) {
-            this.log(`${cl.am}]> ${cl.rd}Failed to load proxy backups: ${error.message}`, 'error');
-            this.proxyBackupList = [];
-        }
-    }
-
-    getNextBackupProxy() {
-        return this.proxyBackupList.length > 0 ? this.proxyBackupList.shift() : null;
     }
 
     async reconnectWebSocket(account, access_token, proxy, ws) {
@@ -564,14 +300,7 @@ class TeneoBot {
                 cleanup();
 
                 if (retryCount >= maxRetries) {
-                    const backupProxy = this.getNextBackupProxy();
-                    if (backupProxy) {
-                        this.log(`${cl.am}]> ${cl.yl}Switching to backup proxy ${cl.rt}for ${this.hideEmail(account.email)}`, 'warn');
-                        currentProxy = backupProxy;
-                        retryCount = 0;
-                    } else {
-                        throw new Error(`${cl.am}]> ${cl.rd}No more backup proxies available`);
-                    }
+                    throw new Error(`${cl.am}]> ${cl.rd}Maximum reconnection attempts reached for ${this.hideEmail(account.email)}`);
                 }
 
                 this.log(`${cl.am}]> ${cl.yl}Attempting reconnection ${cl.rt}for ${this.hideEmail(account.email)} (attempt ${retryCount + 1})`);
@@ -586,10 +315,9 @@ class TeneoBot {
                 retryCount++;
                 this.log(`${cl.am}]> ${cl.rd}Reconnection failed ${cl.rt}for ${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
 
-                if (retryCount < maxRetries || this.proxyBackupList.length > 0) {
+                if (retryCount < maxRetries) {
                     const delay = calculateDelay(retryCount);
                     this.log(`${cl.am}]> ${cl.yl}Waiting ${delay/1000} seconds before next retry`, 'warn');
-
                     return new Promise((resolve) => {
                         setTimeout(() => resolve(reconnect()), delay);
                     });
@@ -605,15 +333,6 @@ class TeneoBot {
         const userAgents = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Edge/537.36",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Edge/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Edge/120.0.0.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.3",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 OPR/114.0.0.",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.3",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.3",
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AtContent/95.5.5462.5",
         ];
 
@@ -687,11 +406,6 @@ class TeneoBot {
 
                     case "Invalid authentication token. Please log in again.":
                         this.log(`${baseLogStr} ${cl.rd} Invalid authentication token. Please log in again.`);
-                        // Get the proxy associated with this connection
-                        const proxy = ws._proxy;
-                        // Move the failed account and its proxy to error file
-                        await this.moveFailedAccountToError(account, proxy);
-                        // Close the websocket connection
                         ws.terminate();
                         break;
 
@@ -739,206 +453,8 @@ class TeneoBot {
         }
     }
 
-    async moveFailedAccountToError(account, proxy) {
-        try {
-            if (!account || !account.email) {
-                throw new Error('Invalid account data');
-            }
-
-            const errorFilePath = path.join(__dirname, 'accounts_error.json');
-            const accountsFilePath = path.join(__dirname, 'accounts.js');
-            let errorAccounts = [];
-            
-            try {
-                const errorContent = await fs.readFile(errorFilePath, 'utf-8');
-                errorAccounts = JSON.parse(errorContent);
-            } catch (error) {
-                // File doesn't exist yet, continue with empty array
-            }
-
-            // Check if account already exists in error file
-            const accountExists = errorAccounts.some(entry => entry.account.email === account.email);
-            
-            if (!accountExists) {
-                errorAccounts.push({
-                    account: account,
-                    proxy: proxy ? proxy.trim() : null,
-                    timestamp: new Date().toISOString()
-                });
-
-                await fs.writeFile(
-                    errorFilePath,
-                    JSON.stringify(errorAccounts, null, 2),
-                    'utf-8'
-                );
-
-                // Handle DataAllAccount.js
-                const dataAllAccountPath = path.join(__dirname, 'DataAllAccount.js');
-                try {
-                    let dataAllAccountExists = true;
-                    let DataAllAccount = [];
-
-                    try {
-                        const fileStats = await fs.stat(dataAllAccountPath);
-                        if (fileStats.size === 0) {
-                            dataAllAccountExists = false;
-                        } else {
-                            ({ DataAllAccount } = require('./DataAllAccount.js'));
-                        }
-                    } catch (error) {
-                        dataAllAccountExists = false;
-                        const initialContent = 'const DataAllAccount = [];\n\nmodule.exports = { DataAllAccount };';
-                        await fs.writeFile(dataAllAccountPath, initialContent, 'utf-8');
-                    }
-
-                    if (dataAllAccountExists) {
-                        const updatedAccounts = DataAllAccount.filter(acc => acc.email !== account.email);
-                        const fileContent = `const DataAllAccount = ${JSON.stringify(updatedAccounts, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
-                        await fs.writeFile(dataAllAccountPath, fileContent, 'utf-8');
-                    }
-                } catch (error) {
-                    this.log(`${cl.am}]> ${cl.rd}Error updating DataAllAccount.js: ${error.message}${cl.rt}`, 'error');
-                }
-
-                // Handle accounts.js
-                try {
-                    let { accountLists } = require('./accounts.js');
-                    const updatedAccountLists = accountLists.filter(acc => acc.email !== account.email);
-                    const accountsContent = `const accountLists = ${JSON.stringify(updatedAccountLists, null, 2)};\n\nmodule.exports = { accountLists };`;
-                    await fs.writeFile(accountsFilePath, accountsContent, 'utf-8');
-                } catch (error) {
-                    this.log(`${cl.am}]> ${cl.rd}Error updating accounts.js: ${error.message}${cl.rt}`, 'error');
-                }
-
-                // Remove proxy if exists
-                if (proxy) {
-                    const proxyFilePath = path.join(__dirname, 'proxy.txt');
-                    try {
-                        const proxyContent = await fs.readFile(proxyFilePath, 'utf-8');
-                        const proxyList = proxyContent.split('\n')
-                            .map(p => p.trim())
-                            .filter(p => p && p !== proxy.trim());
-                        await fs.writeFile(proxyFilePath, proxyList.join('\n'), 'utf-8');
-                    } catch (error) {
-                        this.log(`${cl.am}]> ${cl.rd}Error updating proxy file: ${error.message}${cl.rt}`, 'error');
-                    }
-                }
-
-                this.log(`${cl.am}]> ${cl.yl}Moved failed account ${this.hideEmail(account.email)} to accounts_error.json${cl.rt}`);
-            }
-        } catch (error) {
-            this.log(`${cl.am}]> ${cl.rd}Error moving failed account to error file: ${error.message}${cl.rt}`, 'error');
-            throw error;
-        }
-    }
-    
-    async saveAccountData(accountData) {
-        const filePath = path.join(__dirname, 'DataAllAccount.js');
-        const fileContent = `const DataAllAccount = ${JSON.stringify(accountData, null, 2)};\n\nmodule.exports = { DataAllAccount };`;
-        await fs.writeFile(filePath, fileContent, 'utf-8');
-    }
-
-    async LoginAllAccounts() {
-        console.clear();
-        this.CoderMark();
-        this.log(`${cl.yl}Login To All Accounts With Proxy Connection Mode Enabled!\n\n${cl.rt}`);
-
-        const MAX_RETRIES = 2;
-        const CONCURRENT_LOGINS = 1;
-        const RETRY_DELAY = 1000;
-
-        const proxies = await this.validateAccountsAndProxies();
-        const accountData = [];
-
-        const loginWithRetry = async (account, proxy, retryCount = 0) => {
-            try {
-                const { access_token, userId, proxyIP } = await this.login(account, proxy);
-                accountData.push({
-                    email: account.email,
-                    userId,
-                    access_token
-                });
-                this.log(`${cl.am}]> ${cl.bl}Account ${cl.rt}${this.hideEmail(account.email)} ${cl.gl}Login Success ${cl.rt}With ProxyIP ${cl.br}${proxyIP}`);
-                return true;
-            } catch (error) {
-                if (retryCount < MAX_RETRIES) {
-                    this.log(`${cl.am}]> ${cl.yl}Retrying login for ${cl.rt}${this.hideEmail(account.email)} (Attempt ${retryCount + 1}/${MAX_RETRIES})`);
-                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-                    return loginWithRetry(account, proxy, retryCount + 1);
-                }
-                this.log(`${cl.am}]> ${cl.rd}Error with account ${cl.rt}${this.hideEmail(account.email)}: ${cl.rd}${error.message}`, 'error');
-                await this.moveFailedAccountToError(account, proxy);
-                return false;
-            }
-        };
-
-        const processAccountBatch = async (startIndex) => {
-            const batch = [];
-            for (let i = 0; i < CONCURRENT_LOGINS && startIndex + i < accountLists.length; i++) {
-                const account = accountLists[startIndex + i];
-                const proxy = proxies[startIndex + i].trim();
-                batch.push(loginWithRetry(account, proxy));
-            }
-            return Promise.all(batch);
-        };
-
-        for (let i = 0; i < accountLists.length; i += CONCURRENT_LOGINS) {
-            await processAccountBatch(i);
-        }
-
-        await this.saveAccountData(accountData);
-        await console.clear();
-        await this.CoderMark();
-        await this.runWithCurrentSession();
-    }
-
-
-    async runSingleAccount() {
-        console.clear();
-        this.CoderMark();
-        this.log(`${cl.yl}Direct Connection Mode Enabled!\n\n${cl.yl}]-> ${cl.gr}Please, Login To Your Account!\n${cl.rt}`);
-        const email = await new Promise(resolve => {
-            this.rl.question(`Enter email: `, resolve);
-        });
-        const password = await new Promise(resolve => {
-            this.rl.question(`Enter password: `, resolve);
-        });
-
-        try {
-            const account = {
-                email,
-                password
-            };
-            const {
-                access_token,
-                userId
-            } = await this.login(account, null);
-
-            const accountData = [{
-                email,
-                userId,
-                access_token
-            }];
-
-            await this.saveAccountData(accountData);
-
-            const ws = await this.setupWebSocket(account, access_token, null);
-            this.activeConnections.set(email, ws);
-
-        } catch (error) {
-            this.log(`${cl.am}]> ${cl.rd}Error with single account: ${error.message}`, 'error');
-        }
-    }
-
     async start() {
-        const menuOptions = [{
-                label: `Run And Login To All Accounts ${cl.gl}(with proxy)${cl.rt}`,
-                action: this.LoginAllAccounts.bind(this)
-            },
-            {
-                label: `Run Single Account ${cl.am}(Direct Connection)${cl.rt}`,
-                action: this.runSingleAccount.bind(this)
-            },
+        const menuOptions = [
             {
                 label: `Run All Account with ${cl.bl}Current${cl.rt} Session ${cl.gl}(with proxy)${cl.rt}`,
                 action: this.runWithCurrentSession.bind(this)
@@ -980,3 +496,4 @@ class TeneoBot {
 
 const bot = new TeneoBot();
 bot.start();
+
